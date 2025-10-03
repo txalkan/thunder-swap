@@ -100,7 +100,7 @@ npx tsx src/index.ts "rgb1..." "02abc..." "tb1..."
 ```
 
 Replace:
-- `"rgb1..."` with your RGB-LN invoice
+- `"rgb1..."` with the user's RGB-LN invoice (the invoice they want to pay)
 - `"02abc..."` with the user's refund public key (64 hex chars, compressed)  
 - `"tb1..."` with the user's refund Bitcoin address
 

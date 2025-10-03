@@ -28,9 +28,9 @@ function parseArgs(): ParsedArgs {
   const [invoice, userRefundPubkeyHex, userRefundAddress] = args;
 
   // Validate inputs
-  if (invoice.length < 10 || !invoice.startsWith('rgb')) {
+  if (invoice.length < 10 || !invoice.startsWith('ln')) {
     console.error('ERROR: Invalid RGB invoice format');
-    console.error('  Expected format: rgb1...');
+    console.error('  Expected format: ln...');
     process.exit(1);
   }
 
@@ -41,8 +41,8 @@ function parseArgs(): ParsedArgs {
     process.exit(1);
   }
 
-  if (userRefundAddress.length < 26 || userRefundAddress.length > 62) {
-    console.error('ERROR: Invalid user refund address format');
+  if (userRefundAddress.length < 26 || userRefundAddress.length > 90) {
+    console.error('ERROR: Invalid user refund address format',userRefundAddress);
     console.error('  Expected valid Bitcoin address');
     process.exit(1);
   }

@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import { config } from '../config.js';
-import { DecodeInvoiceResponse, PayInvoiceResponse } from './types.js';
+import { DecodeInvoiceResponse, PayInvoiceResponse, GetPaymentResponse } from './types.js';
 
 /**
  * RGB-LN API client for invoice decode and payment
@@ -60,6 +60,24 @@ export class RLNClient {
     } catch (error: any) {
       const errorMsg = error?.response?.data?.error || error?.message || 'Payment failed';
       throw new Error(`RLN payment error: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Get payment details by payment hash, including preimage if available
+   */
+  async getPayment(paymentHash: string): Promise<GetPaymentResponse> {
+    try {
+      console.log(`Getting payment details for hash: ${paymentHash}...`);
+      
+      const response = await this.httpClient.post('/getpayment', {
+        payment_hash: paymentHash
+      });
+
+      return response.data;
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.error || error?.message || 'Failed to get payment details';
+      throw new Error(`RLN getPayment error: ${errorMsg}`);
     }
   }
 }

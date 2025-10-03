@@ -29,9 +29,12 @@ class BitcoinRPCClientImpl implements BitcoinRPCClient {
     this.pass = config.BITCOIN_RPC_PASS;
   }
 
-  private async rpcCall<T = any>(method: string, params: any[] = []): Promise<T> {
+  private async rpcCall<T = any>(method: string, params: any[] = [], wallet?: string): Promise<T> {
+    // Use wallet-specific endpoint if wallet is specified
+    const url = wallet ? `${this.baseUrl}/wallet/${wallet}` : this.baseUrl;
+    
     const response = await axios.post<RPCResponse<T>>(
-      this.baseUrl,
+      url,
       {
         jsonrpc: '2.0',
         id: 1,
@@ -70,15 +73,15 @@ class BitcoinRPCClientImpl implements BitcoinRPCClient {
   }
 
   async listUnspent(minconf = 0, maxconf = 9999999, addresses: string[] = []): Promise<any[]> {
-    const params = [minconf, maxconf];
+    const params: any[] = [minconf, maxconf];
     if (addresses.length > 0) {
       params.push(addresses);
     }
-    return this.rpcCall('listunspent', params);
+    return this.rpcCall('listunspent', params, 'swap');
   }
 
   async importAddress(address: string): Promise<void> {
-    return this.rpcCall('importaddress', [address, '', false]);
+    return this.rpcCall('importaddress', [address, '', false], 'swap');
   }
 }
 
