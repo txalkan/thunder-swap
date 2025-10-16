@@ -1,7 +1,3 @@
-// Example: ATOMIC RGB-LN Liquidity Provider using witness_receive with HTLC
-//
-// This version uses witness_receive with a custom HTLC script to achieve TRUE atomicity!
-// Key insight: beneficiary_from_script_buf() accepts ANY ScriptBuf, including P2WSH HTLC scripts
 
 use rgb_lib::{
     wallet::{Wallet, WalletData, Online, DatabaseType},
@@ -19,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use reqwest::blocking::Client;
 use serde_json::json;
 
-/// RGB-LN invoice structure (simplified)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RgbLnInvoice {
     pub payment_hash: String,
@@ -29,7 +24,6 @@ pub struct RgbLnInvoice {
     pub expiry: u64,
 }
 
-/// RGB-LN Node Client - Actual API Implementation
 #[derive(Debug, Clone)]
 pub struct RgbLnNodeClient {
     base_url: String,
@@ -37,7 +31,6 @@ pub struct RgbLnNodeClient {
     client: Client,
 }
 
-/// Response from decode invoice API call
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecodeInvoiceResponse {
     pub payment_hash: String,
@@ -46,7 +39,6 @@ pub struct DecodeInvoiceResponse {
     pub expires_at: Option<u64>,
 }
 
-/// Response from pay invoice API call
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PayInvoiceResponse {
     pub status: PaymentStatus,
@@ -54,7 +46,6 @@ pub struct PayInvoiceResponse {
     pub payment_secret: String,
 }
 
-/// Payment status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PaymentStatus {
     Succeeded,
@@ -62,7 +53,6 @@ pub enum PaymentStatus {
     Pending,
 }
 
-/// Payment details from getPayment API call
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentDetails {
     pub amt_msat: u64,
@@ -78,7 +68,6 @@ pub struct PaymentDetails {
     pub preimage: Option<String>,
 }
 
-/// Response from getPayment API call
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetPaymentResponse {
     pub payment: PaymentDetails,
@@ -93,7 +82,6 @@ impl RgbLnNodeClient {
         }
     }
 
-    /// Decode RGB-LN invoice to extract payment details
     pub fn decode_invoice(&self, invoice: &str) -> Result<DecodeInvoiceResponse, Error> {
         println!("Decoding RGB-LN invoice...");
         
@@ -124,7 +112,6 @@ impl RgbLnNodeClient {
             })
     }
 
-    /// Pay RGB-LN invoice and return preimage on successful payment
     pub fn pay_invoice(&self, invoice: &str) -> Result<PayInvoiceResponse, Error> {
         println!("Paying RGB-LN invoice...");
         
@@ -163,7 +150,6 @@ impl RgbLnNodeClient {
         Ok(result)
     }
 
-    /// Get payment details by payment hash, including preimage if available
     pub fn get_payment(&self, payment_hash: &str) -> Result<GetPaymentResponse, Error> {
         println!("Getting payment details for hash: {}...", payment_hash);
         
@@ -198,7 +184,6 @@ impl RgbLnNodeClient {
     }
 }
 
-/// HTLC status tracking
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HtlcStatus {
     Created,
@@ -210,7 +195,6 @@ pub enum HtlcStatus {
     Expired,
 }
 
-/// RGB HTLC structure with ATOMIC guarantees
 #[derive(Debug, Clone)]
 pub struct AtomicRgbHtlc {
     pub swap_id: String,
@@ -222,11 +206,9 @@ pub struct AtomicRgbHtlc {
     pub timelock_blocks: u32,
     pub status: HtlcStatus,
     
-    // HTLC-specific fields (ATOMIC!)
     pub htlc_script: ScriptBuf,
     pub htlc_address: String,
     
-    // RGB-specific fields
     pub recipient_id: Option<String>,
     pub batch_transfer_idx: Option<u32>,
     pub preimage: Option<[u8; 32]>,
@@ -245,7 +227,6 @@ impl AtomicRgbHtlc {
         use sha256::Hash;
         let swap_id = Hash::hash(&payment_hash).to_string();
         
-        // Create HTLC script (THIS IS THE ATOMIC PART!)
         let htlc_script = Self::create_htlc_script(
             &payment_hash,
             &lp_pubkey,
@@ -253,7 +234,6 @@ impl AtomicRgbHtlc {
             timelock_blocks,
         );
         
-        // Create P2WSH address from HTLC script
         let htlc_address = Address::p2wsh(&htlc_script, network).to_string();
         
         Self {
@@ -273,10 +253,6 @@ impl AtomicRgbHtlc {
         }
     }
 
-    /// Create HTLC Bitcoin script
-    /// This script ensures ATOMICITY:
-    /// - LP can ONLY claim with preimage (proves payment succeeded)
-    /// - User can refund after timelock (if payment failed)
     fn create_htlc_script(
         payment_hash: &[u8; 32],
         lp_pubkey: &PublicKey,
@@ -285,14 +261,12 @@ impl AtomicRgbHtlc {
     ) -> ScriptBuf {
         Builder::new()
             .push_opcode(OP_IF)
-                // Success path: LP claims with preimage
                 .push_opcode(OP_SHA256)
                 .push_slice(payment_hash)
                 .push_opcode(OP_EQUALVERIFY)
                 .push_key(lp_pubkey)
                 .push_opcode(OP_CHECKSIG)
             .push_opcode(OP_ELSE)
-                // Refund path: User reclaims after timelock
                 .push_int(timelock_blocks as i64)
                 .push_opcode(OP_CSV)
                 .push_opcode(OP_DROP)
@@ -309,10 +283,8 @@ impl AtomicRgbHtlc {
     }
 }
 
-/// ATOMIC LP service - No trust required!
-/// Now with full wallet integration via script_receive!
 pub struct AtomicRgbLnLiquidityProvider {
-    wallet: Wallet,  // Used for script_receive and transfer tracking
+    wallet: Wallet,
     active_swaps: HashMap<String, AtomicRgbHtlc>,
     lp_pubkey: PublicKey,
     proxy_url: String,
@@ -342,44 +314,31 @@ impl AtomicRgbLnLiquidityProvider {
         })
     }
 
-    /// Make the wallet online to enable network operations
-    /// This is required for refresh() and other online operations
     #[cfg(any(feature = "electrum", feature = "esplora"))]
     pub fn go_online(
         &mut self,
         skip_consistency_check: bool,
         electrum_url: Option<String>,
     ) -> Result<Online, Error> {
-        println!("   🌐 Bringing wallet online...");
-        
         let online = self.wallet.go_online(
             skip_consistency_check,
             electrum_url.unwrap_or_else(|| "ssl://electrum.blockstream.info:60002".to_string()),
         )?;
         
-        println!("   ✅ Wallet is now online!");
         Ok(online)
     }
 
-    /// Step 1: Create ATOMIC swap with HTLC using wallet's receive logic
-    /// 
-    /// ✅ TRUE ATOMICITY ACHIEVED!
-    /// - User sends to HTLC address (locked with payment_hash)
-    /// - LP can ONLY claim with preimage
-    /// - User can refund if LP doesn't pay (after timelock)
     pub fn create_atomic_swap(
         &mut self,
         invoice: RgbLnInvoice,
         user_pubkey: PublicKey,
     ) -> Result<AtomicSwapOffer, Error> {
-        // Validate invoice
         if invoice.asset_id.is_empty() {
             return Err(Error::Internal {
                 details: "Invalid asset ID".to_string(),
             });
         }
 
-        // Parse payment hash from hex
         let payment_hash = hex::decode(&invoice.payment_hash)
             .map_err(|e| Error::Internal {
                 details: format!("Invalid payment hash: {}", e),
@@ -389,34 +348,29 @@ impl AtomicRgbLnLiquidityProvider {
                 details: "Payment hash must be 32 bytes".to_string(),
             })?;
 
-        // Create ATOMIC HTLC
         let htlc = AtomicRgbHtlc::new(
             payment_hash,
             invoice.amount_asset,
             invoice.asset_id.clone(),
             self.lp_pubkey.clone(),
             user_pubkey,
-            144, // ~24 hours timelock
+            144,
             self.bitcoin_network,
         );
 
-        // 🎯 KEY INSIGHT: Use wallet's script_receive method!
-        // This is the proper way to receive RGB assets to a custom script
         
         let receive_data = self.wallet.script_receive(
             htlc.htlc_script.clone(),
-            // Some(invoice.asset_id.clone()),
             None,
             rgb_lib::Assignment::Fungible(htlc.amount),
-            Some(86400), // 24 hours
+            Some(86400),
             vec![self.proxy_url.clone()],
-            1, // min confirmations
+            1,
         )?;
         
         let recipient_id = receive_data.recipient_id;
         let rgb_invoice = receive_data.invoice;
 
-        // Store HTLC
         let mut htlc = htlc;
         htlc.recipient_id = Some(recipient_id.clone());
         htlc.status = HtlcStatus::AwaitingFunding;
@@ -427,7 +381,7 @@ impl AtomicRgbLnLiquidityProvider {
 
         Ok(AtomicSwapOffer {
             swap_id,
-            htlc_address,  // This is a P2WSH address with HTLC script!
+            htlc_address,
             recipient_id,
             rgb_invoice,
             payment_hash: invoice.payment_hash,
@@ -435,8 +389,6 @@ impl AtomicRgbLnLiquidityProvider {
         })
     }
 
-    /// Step 2: Monitor HTLC funding by refreshing wallet transfers
-    /// This checks if RGB assets have been received to the HTLC script
     pub fn check_htlc_funding(
         &mut self,
         online: Online,
@@ -447,30 +399,25 @@ impl AtomicRgbLnLiquidityProvider {
                 details: "Swap not found".to_string(),
             })?;
 
-        // Already funded?
         if htlc.status == HtlcStatus::Funded {
             return Ok(HtlcFundingStatus::Funded);
         }
 
-        // Get recipient_id for this HTLC
         let recipient_id = htlc.recipient_id.clone()
             .ok_or_else(|| Error::Internal {
                 details: "HTLC has no recipient ID".to_string(),
             })?;
 
-        // 🎯 Use wallet.refresh() to sync transfers!
-        // This will detect incoming RGB transfers to our HTLC script
         println!("   🔄 Refreshing wallet to check for incoming transfers...");
         let refresh_result = self.wallet.refresh(
             online.clone(),
-            None,   // Check all assets
-            vec![], // No filters
-            false,  // skip_sync
+            None,
+            vec![],
+            false,
         )?;
 
         println!("   📊 Refresh complete: {} transfers updated", refresh_result.len());
 
-        // List all assets in wallet
         let assets = self.wallet.list_assets(vec![])?;
         let total_assets = 
             assets.nia.as_ref().map(|v| v.len()).unwrap_or(0) +
@@ -493,13 +440,11 @@ impl AtomicRgbLnLiquidityProvider {
             }
         }
 
-        // List all unspents (UTXOs)
         let unspents = self.wallet.list_unspents(Some(online.clone()), false, false)?;
         let total_utxos = unspents.len();
         let total_btc: u64 = unspents.iter().map(|u| u.utxo.btc_amount).sum();
         println!("   🔷 UTXOs in wallet: {} (total: {} sats)", total_utxos, total_btc);
         
-        // Show colored UTXOs (those with RGB allocations)
         let colored_utxos: Vec<_> = unspents.iter()
             .filter(|u| !u.rgb_allocations.is_empty())
             .collect();
@@ -526,8 +471,6 @@ impl AtomicRgbLnLiquidityProvider {
             }
         }
 
-        // Check if any transfer matches our recipient_id
-        // If we have NIA assets, filter by the first one for better performance
         let asset_filter = if let Some(ref nia_assets) = assets.nia {
             if !nia_assets.is_empty() {
                 let asset_id = nia_assets[0].asset_id.clone();
@@ -549,7 +492,6 @@ impl AtomicRgbLnLiquidityProvider {
                 println!("      Status: {:?}", transfer.status);
                 println!("      Recipient: {}", transfer.recipient_id.as_ref().unwrap());
                 
-                // Check if settled
                 use rgb_lib::TransferStatus;
                 if transfer.status == TransferStatus::Settled {
                     return Ok(HtlcFundingStatus::Funded);
@@ -562,7 +504,6 @@ impl AtomicRgbLnLiquidityProvider {
         Ok(HtlcFundingStatus::Pending)
     }
 
-    /// Step 3: Pay invoice using RGB-LN node
     pub fn pay_invoice(
         &mut self,
         swap_id: &str,
@@ -581,7 +522,6 @@ impl AtomicRgbLnLiquidityProvider {
 
         htlc.status = HtlcStatus::PaymentInProgress;
 
-        // Step 1: Decode invoice to verify payment hash matches
         let decode_response = self.rgb_ln_client.decode_invoice(invoice_string)?;
         
         if decode_response.payment_hash != hex::encode(htlc.payment_hash) {
@@ -590,10 +530,8 @@ impl AtomicRgbLnLiquidityProvider {
             });
         }
 
-        // Step 2: Pay the invoice
         let pay_response = self.rgb_ln_client.pay_invoice(invoice_string)?;
         
-        // Step 3: Get payment details to retrieve preimage
         let payment_details = self.rgb_ln_client.get_payment(&pay_response.payment_hash)?;
         
         match payment_details.payment.status {
@@ -625,12 +563,6 @@ impl AtomicRgbLnLiquidityProvider {
         }
     }
 
-    /// Step 4: Claim HTLC with preimage - ATOMIC!
-    /// 
-    /// This is where atomicity is enforced:
-    /// - Must provide valid preimage
-    /// - Preimage proves LP paid the invoice
-    /// - Bitcoin script validates preimage on-chain
     pub fn claim_htlc_atomic(
         &mut self,
         swap_id: &str,
@@ -641,37 +573,12 @@ impl AtomicRgbLnLiquidityProvider {
                 details: "Swap not found".to_string(),
             })?;
 
-        // Verify preimage
         if !htlc.verify_preimage(&preimage) {
             return Err(Error::Internal {
                 details: "Invalid preimage - hash doesn't match!".to_string(),
             });
         }
 
-        // In a real implementation, you would:
-        // 1. Find the HTLC UTXO on-chain
-        // 2. Build Bitcoin transaction spending it with:
-        //    - Witness: [signature, preimage, 0x01, htlc_script]
-        // 3. Broadcast claim transaction
-        // 4. RGB assets automatically follow the UTXO to LP wallet
-        
-        // Pseudo-code for claim:
-        /*
-        let htlc_utxo = find_htlc_utxo(&htlc.htlc_address)?;
-        
-        let claim_tx = build_claim_transaction(
-            htlc_utxo,
-            htlc.htlc_script.clone(),
-            preimage,
-            lp_signature,
-            lp_destination_address,
-        )?;
-        
-        broadcast_transaction(claim_tx)?;
-        
-        // RGB state follows the UTXO
-        // LP now owns the RGB assets!
-        */
         
         htlc.status = HtlcStatus::Claimed;
         htlc.preimage = Some(preimage);
@@ -681,11 +588,10 @@ impl AtomicRgbLnLiquidityProvider {
             amount_claimed: htlc.amount,
             asset_id: htlc.asset_id.clone(),
             preimage_hex: hex::encode(preimage),
-            claim_txid: "placeholder_txid".to_string(),  // Would be real txid
+            claim_txid: "placeholder_txid".to_string(),
         })
     }
 
-    /// Get refund information for user (if LP doesn't pay)
     pub fn get_refund_info(&self, swap_id: &str) -> Result<RefundInfo, Error> {
         let htlc = self.active_swaps.get(swap_id)
             .ok_or_else(|| Error::Internal {
@@ -701,18 +607,11 @@ impl AtomicRgbLnLiquidityProvider {
         })
     }
 
-    /// Complete atomic swap: Pay invoice and claim HTLC
-    /// 
-    /// This is the full atomic swap flow:
-    /// 1. Pay RGB-LN invoice
-    /// 2. Receive preimage
-    /// 3. Claim HTLC with preimage
     pub fn complete_atomic_swap(
         &mut self,
         swap_id: &str,
         invoice_string: &str,
     ) -> Result<AtomicClaimResult, Error> {
-        // Step 1: Pay invoice and get preimage
         let payment_result = self.pay_invoice(swap_id, invoice_string)?;
         
         if !payment_result.success {
@@ -726,7 +625,6 @@ impl AtomicRgbLnLiquidityProvider {
                 details: "No preimage in payment result".to_string(),
             })?;
 
-        // Convert hex preimage to bytes
         let preimage_bytes = hex::decode(&preimage_hex)
             .map_err(|e| Error::Internal {
                 details: format!("Invalid preimage hex: {}", e),
@@ -737,19 +635,17 @@ impl AtomicRgbLnLiquidityProvider {
                 details: "Preimage must be 32 bytes".to_string(),
             })?;
 
-        // Step 2: Claim HTLC with preimage
         self.claim_htlc_atomic(swap_id, preimage)
     }
 }
 
-// Response types
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AtomicSwapOffer {
     pub swap_id: String,
-    pub htlc_address: String,       // P2WSH address with HTLC script
-    pub recipient_id: String,        // RGB recipient ID for HTLC
-    pub rgb_invoice: String,         // RGB invoice for HTLC address
+    pub htlc_address: String,
+    pub recipient_id: String,
+    pub rgb_invoice: String,
     pub payment_hash: String,
     pub timelock_blocks: u32,
 }
@@ -785,29 +681,15 @@ pub struct RefundInfo {
     pub can_refund: bool,
 }
 
-// Example usage - Full working demonstration
 fn main() -> Result<(), Error> {
-    println!("🎉 ATOMIC RGB-LN Liquidity Provider - Full Demo");
-    println!("===============================================\n");
+    println!("Demo");
 
-    // Step 1: Create test data directory
     let data_dir = std::env::temp_dir().join("atomic_swap_demo");
     if !data_dir.exists() {
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| Error::Internal { details: format!("Failed to create dir: {}", e) })?;
     }
-    println!("📁 Data directory: {:?}\n", data_dir);
-
-    // Step 2: Generate keys for LP wallet
-    println!("🔑 Generating LP wallet keys...");
     let lp_keys = generate_keys(BitcoinNetwork::Regtest);
-    println!("   ✅ Mnemonic: {}", lp_keys.mnemonic);
-    println!("   ✅ Master fingerprint: {}", lp_keys.master_fingerprint);
-    println!("   ✅ Account xPub (RGB): {}", lp_keys.account_xpub_colored);
-    println!("   ✅ Account xPub (BTC): {}\n", lp_keys.account_xpub_vanilla);
-
-    // Step 3: Create LP wallet
-    println!("💼 Creating LP wallet...");
     let wallet_data = WalletData {
         data_dir: data_dir.to_string_lossy().to_string(),
         bitcoin_network: BitcoinNetwork::Regtest,
@@ -824,41 +706,32 @@ fn main() -> Result<(), Error> {
     };
 
     let _wallet = Wallet::new(wallet_data.clone())?;
-    println!("   ✅ LP wallet created successfully!\n");
+    println!("LP wallet created successfully!\n");
 
-    // Step 4: Get LP public key from wallet
     use std::str::FromStr;
     use rgb_lib::bitcoin::bip32::Xpub;
     
-    // Derive public key from wallet's colored xPub
     let xpub = Xpub::from_str(&lp_keys.account_xpub_colored)
         .expect("Valid xPub");
     
-    // Derive first public key from the xPub (m/0)
     let secp = rgb_lib::bitcoin::secp256k1::Secp256k1::new();
     let derived_xpub = xpub.derive_pub(&secp, &[
         rgb_lib::bitcoin::bip32::ChildNumber::from_normal_idx(0).unwrap()
     ]).expect("Derivation succeeds");
     
-    // Convert secp256k1::PublicKey to bitcoin::PublicKey
     let lp_pubkey = PublicKey::new(derived_xpub.public_key);
     
-    println!("🔑 LP Public Key (from wallet): {}\n", lp_pubkey);
+    println!("LP Public Key (from wallet): {}\n", lp_pubkey);
 
-    // Step 5: User public key (provided)
     let user_pubkey = PublicKey::from_str(
         "03d6c27614557184d269b9cb19b1bc32479e661d86a925f4c4e46c734adcea3d19"
     ).expect("Valid user pubkey");
-    println!("🔑 User Public Key: {}\n", user_pubkey);
+    println!("User Public Key: {}\n", user_pubkey);
 
-    // Step 6: Use REAL preimage and payment hash from preimage.txt
-    // Preimage: 86a85cd1cb86c51186d190972c9f8413f436911fc0de241b6df20877ebbadecc
-    // Payment Hash: f4d376425855e2354bf30e17904f4624f6f9aa297973cca0445cdf4cef718b2a
     
     let preimage_hex = "86a85cd1cb86c51186d190972c9f8413f436911fc0de241b6df20877ebbadecc";
     let payment_hash_hex = "f4d376425855e2354bf30e17904f4624f6f9aa297973cca0445cdf4cef718b2a";
     
-    // Convert hex strings to byte arrays
     let preimage_bytes = hex::decode(preimage_hex)
         .expect("Valid preimage hex");
     let preimage: [u8; 32] = preimage_bytes.try_into()
@@ -869,11 +742,10 @@ fn main() -> Result<(), Error> {
     let payment_hash: [u8; 32] = payment_hash_bytes.try_into()
         .expect("Payment hash is 32 bytes");
     
-    // Verify preimage hashes to payment_hash
     let computed_hash = sha256::Hash::hash(&preimage);
     let computed_hash_bytes: &[u8] = computed_hash.as_ref();
     
-    println!("🔐 REAL Payment Data from preimage.txt:");
+    println!(" Payment Data");
     println!("   Preimage:     {}", preimage_hex);
     println!("   Payment Hash: {}", payment_hash_hex);
     println!("   Verified:     {}\n", computed_hash_bytes == &payment_hash[..]);
@@ -886,181 +758,99 @@ fn main() -> Result<(), Error> {
         expiry: 36000,
     };
 
-    println!("📧 RGB-LN Invoice:");
+    println!("RGB-LN Invoice:");
     println!("   Payment Hash: {}", invoice.payment_hash);
     println!("   Amount: {} asset units", invoice.amount_asset);
     println!("   Asset ID: {}", invoice.asset_id);
     println!("   Description: {}\n", invoice.description);
 
-    // Step 7: Initialize LP service
-    println!("🚀 Initializing Atomic LP Service...");
+    println!("Initializing Atomic LP Service...");
     let mut lp = AtomicRgbLnLiquidityProvider::new(
         wallet_data,
         lp_pubkey,
         "rpc://regtest.thunderstack.org:3000/json-rpc".to_string(),
         BdkNetwork::Regtest,
-        "http://localhost:3000".to_string(), // RGB-LN node URL
-        None, // No API key for demo
+        "http://localhost:3000".to_string(),
+        None,
     )?;
-    println!("   ✅ LP service ready!\n");
+    println!(" LP ready!\n");
 
-    // Step 8: Create atomic swap offer
-    println!("🔨 Creating ATOMIC HTLC swap...");
+    println!("Creating ATOMIC HTLC swap...");
     let offer = lp.create_atomic_swap(invoice.clone(), user_pubkey)?;
     
-    println!("   ✅ HTLC Created!");
+    println!(" HTLC Created!");
     println!("   Swap ID: {}", offer.swap_id);
     println!("   HTLC Address: {}", offer.htlc_address);
     println!("   Recipient ID: {}", offer.recipient_id);
     println!("   Payment Hash: {}", offer.payment_hash);
-    println!("   Timelock: {} blocks (~24 hours)\n", offer.timelock_blocks);
+    println!("   Timelock: {} blocks\n", offer.timelock_blocks);
 
-    // Step 9: Display RGB invoice for user to send assets
-    println!("📬 RGB Invoice for User:");
+    println!("RGB Invoice for User:");
     println!("   {}\n", offer.rgb_invoice);
     println!("   User should send {} units of {} to this address", 
              invoice.amount_asset, invoice.asset_id);
 
-    // Step 10: Show HTLC script details
-    println!("📜 HTLC Script Guarantees:");
+    println!("HTLC Script Guarantees:");
     println!("   IF (preimage SHA256 == {}):", hex::encode(&payment_hash[..8]));
-    println!("     ✅ LP can claim with signature");
+    println!("      LP can claim with signature");
     println!("   ELSE:");
-    println!("     ⏰ User can refund after {} blocks\n", offer.timelock_blocks);
+    println!("     User can refund after {} blocks\n", offer.timelock_blocks);
 
-    // Step 11: Demonstrate atomicity
-    println!("🔒 ATOMIC GUARANTEE:");
-    println!("   ✅ RGB assets locked in HTLC P2WSH address");
-    println!("   ✅ Only claimable with valid preimage");
-    println!("   ✅ Preimage ONLY obtained by paying RGB-LN invoice");
-    println!("   ✅ Bitcoin script enforces rules on-chain");
-    println!("   ✅ Zero trust required!\n");
 
-    // Step 12: Show next steps
-    println!("📝 Flow Summary:");
-    println!("   1. ✅ LP created HTLC with payment_hash lock");
-    println!("   2. ✅ RGB invoice generated for HTLC address");
-    println!("   3. ⏳ User sends RGB assets to HTLC");
-    println!("   4. ⏳ LP pays RGB-LN invoice");
-    println!("   5. ⏳ LP receives preimage");
-    println!("   6. ⏳ LP claims HTLC with preimage");
-    println!("   7. ⏳ Atomic swap complete!\n");
 
-    println!("🎯 Implementation Status:");
-    println!("   ✅ HTLC script creation - WORKING");
-    println!("   ✅ RGB invoice for HTLC address - WORKING");
-    println!("   ✅ Beneficiary from custom script - WORKING");
-    println!("   ✅ RGB wallet integration - WORKING");
-    println!("   ✅ RGB-LN node client - WORKING");
-    println!("   ⚠️  HTLC funding monitoring (needs blockchain)");
-    println!("   ⚠️  Claim transaction building (needs signing)");
-    println!("   ⚠️  Refund transaction building (needs signing)\n");
-
-    println!("💡 Complete Atomic Swap Flow:");
-    println!("   1. ✅ LP created HTLC and RGB invoice");
-    println!("   2. 📤 User sends RGB assets to: {}", offer.htlc_address);
-    println!("   3. 🔄 LP monitors funding with: lp.check_htlc_funding(online, &swap_id)");
-    println!("   4. 💰 Once funded, LP pays: lp.pay_invoice(&swap_id, invoice_string)");
-    println!("   5. 🎯 LP claims with: lp.complete_atomic_swap(&swap_id, invoice_string)");
+  
     
-    // LIVE DEMONSTRATION: Bring wallet online and monitor in real-time loop
     #[cfg(any(feature = "electrum", feature = "esplora"))]
     {
-        println!("\n📡 LIVE DEMO: Online Wallet Monitoring Loop");
+        println!("\n  DEMO");
         println!("===========================================\n");
         
-        // Bring wallet online with regtest Electrum
-        println!("🌐 Bringing wallet online...");
         match lp.go_online(false, Some("tcp://regtest.thunderstack.org:50001".to_string())) {
             Ok(online) => {
-                println!("   ✅ Wallet is now ONLINE!");
-                println!("   📡 Connected to: tcp://regtest.thunderstack.org:50001\n");
-                
-                println!("🔄 Starting monitoring loop...");
-                println!("   (Will check every 30 seconds for 20 minutes)");
-                println!("   Press Ctrl+C to stop monitoring at any time\n");
-                
+                println!("Wallet ONLINE!");
                 use std::time::{Duration, Instant};
                 use std::thread;
                 
                 let start_time = Instant::now();
-                let timeout = Duration::from_secs(1200); // 20 minutes timeout for demo
+                let timeout = Duration::from_secs(1200);
                 let mut check_count = 0;
                 
                 loop {
                     check_count += 1;
                     let elapsed = start_time.elapsed();
                     
-                    println!("🔍 Check #{} ({}s elapsed)...", check_count, elapsed.as_secs());
-                    
                     match lp.check_htlc_funding(online.clone(), &offer.swap_id) {
                         Ok(status) => {
                             match status {
                                 HtlcFundingStatus::Funded => {
-                                    println!("\n🎉 SUCCESS! HTLC is FUNDED!");
-                                    println!("   ✅ RGB assets received at HTLC address");
-                                    println!("   💰 Transfer status: Settled");
-                                    println!("   🚀 Ready to pay invoice and claim!\n");
-                                    
-                                    println!("   Executing swap...");
-                                    println!("   lp.complete_atomic_swap(&swap_id, invoice_string)?;\n");
+                                    println!("SUCCESS! HTLC is FUNDED!");
                                     break;
                                 }
                                 HtlcFundingStatus::Pending => {
-                                    println!("   ⏳ Status: Pending (WaitingCounterparty)");
+                                    println!("Status: Pending (WaitingCounterparty)");
                                     
-                                    if elapsed > timeout {
-                                        println!("\n⏰ Timeout reached (demo only)");
-                                        println!("   In production, this would continue monitoring...");
-                                        println!("   User has 144 blocks (~24 hours) to fund HTLC\n");
-                                        break;
-                                    }
-                                    
-                                    println!("   💤 Sleeping 10 seconds before next check...\n");
                                     thread::sleep(Duration::from_secs(30));
                                 }
                             }
                         }
                         Err(e) => {
-                            println!("   ⚠️  Error: {}", e);
-                            println!("   🔄 Retrying in 10 seconds...\n");
+                            println!("Error: {}", e);
                             thread::sleep(Duration::from_secs(30));
                             
                             if elapsed > timeout {
-                                println!("   ⏰ Timeout reached");
                                 break;
                             }
                         }
                     }
                 }
                 
-                println!("📊 Monitoring Summary:");
-                println!("   Total checks: {}", check_count);
-                println!("   Duration: {} seconds", start_time.elapsed().as_secs());
-                println!("   HTLC Address: {}", offer.htlc_address);
-                println!("   Status: Waiting for user to send RGB assets\n");
             }
             Err(e) => {
-                println!("   ⚠️  Could not connect to Electrum: {}", e);
-                println!("   ℹ️  Check that regtest.thunderstack.org:50001 is accessible\n");
             }
         }
         
-        println!("📋 What Happens in the Loop:");
-        println!("   1. ✅ wallet.refresh() - Syncs with blockchain");
-        println!("   2. ✅ wallet.list_transfers() - Gets all transfers");
-        println!("   3. ✅ Find transfer matching HTLC recipient_id");
-        println!("   4. ✅ Check if status == Settled");
-        println!("   5. ✅ Sleep 10s and repeat until funded or timeout\n");
+       
     }
-    
-    println!("\n📋 Key Methods:");
-    println!("   • lp.go_online() - Enable network operations");
-    println!("   • lp.check_htlc_funding() - Monitor incoming transfers");
-    println!("   • wallet.refresh() - Sync with blockchain");
-    println!("   • wallet.list_transfers() - Check transfer status");
-    
-    println!("\n✨ Demo complete! Wallet saved at: {:?}", data_dir);
     Ok(())
 }
 
