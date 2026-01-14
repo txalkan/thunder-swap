@@ -18,7 +18,7 @@ RGB-LN Hodl Invoice → Extract Hash → Build P2TR HTLC → Fund/Deposit → Pa
 ✅ Build P2TR HTLC with timelock refund path  
 ✅ Wait for funding confirmations  
 ✅ Pay RGB-LN invoice (submarine swap)  
-✅ Claim HTLC using preimage on success  
+✅ Claim P2TR HTLC using preimage on success (POC, pays LP Taproot address derived from WIF)  
 ✅ Generate refund PSBT on timeout
 
 ## Quick Start
@@ -139,15 +139,6 @@ Env variables:
 
 **Note:** Environment variables override `.env` file values. The scripts set `CLIENT_ROLE` via environment variable, so you can keep a default in `.env` without conflicts.
 
-
-Process:
-
-1. Prompts for swap amount (sats)
-2. Derives USER pubkey and refund address from the USER WIF (Taproot)
-3. Generates 32-byte preimage and SHA256 payment hash
-4. Creates HODL invoice via `/invoice/hodl` (expiry: `HODL_EXPIRY_SEC`)
-5. Persists `payment_hash → {preimage, metadata}` to `hodl_store.json`
-
 ## Protocol Flow
 
 1. Generate 32-byte preimage `P`, compute `H = SHA256(P)`
@@ -157,18 +148,17 @@ Process:
    - Refund path: CLTV timelock (`tLock`) + user signature
 4. Monitor UTXO confirmation (`MIN_CONFS`)
 5. Execute RGB-LN invoice payment
-6. On success: claim HTLC via preimage revelation
+6. On success: claim HTLC via preimage revelation (to LP Taproot address derived from LP WIF)
 7. On timeout/failure: generate refund PSBT (requires `tLock` expiry)
 
 ### Two-Party Flow (User vs Operator)
 
 The POC is split into a USER-side deposit flow and an LP/operator-side execution flow.
 
-
-#### USER: Run Deposit Flow Summary
+#### USER: Deposit + Settle or Cancel & Refund
 
 1. Run script `./run-user.sh` and provide submarine swap amount in sats.
-2. The client generates a preimage and creates a HODL invoice via `/invoice/hodl`.
+2. The client generates a preimage and creates a HODL invoice via `/invoice/hodl`. Persists `payment_hash → {preimage, metadata}` to `hodl_store.json`.
 3. It builds the P2TR HTLC using `LP_PUBKEY_HEX` and funds it from the USER wallet (with locally built P2TR PSBT, signs with `WIF`, and broadcasts - the unsigned PSBT is included in the deposit result for future external signing). Sends invoice amount to the HTLC address:
    1. Select UTXOs from the user taproot address derived from `WIF`.
    2. Build an unsigned PSBT using the chosen inputs and the HTLC output (plus change if applicable).
@@ -179,13 +169,13 @@ The POC is split into a USER-side deposit flow and an LP/operator-side execution
 5. It waits for a claimable event (poll USER RLN for `Pending` inbound payment).
 6. It decides to call `/invoice/settle` or wait for timeout and refund the HTLC.
 
-#### LP/Operator (pay + claim)
+#### LP/Operator: Pay + Claim
 
 1. Receive the invoice and HTLC deposit txid from the USER.
-2. Verify the HTLC using the current verification flow (TODO: not production-ready; basic on-chain output checks only. Limitations include no script-path spend simulation, no signer policy checks, no fee or RBF handling, no reorg handling, and no confirmation of user/LP key provenance beyond matching template parameters.
+2. Verify the HTLC using the current verification flow (POC): confirms confirmations, scriptPubKey match, amount floor, P2TR type, and minimal tapscript sanity. Limitations TODO: no script-path spend simulation/control block validation, no signer policy proofs beyond template match, no fee/RBF/CPFP handling, and no reorg handling.
 3. Call `/sendpayment` to pay the invoice.
 4. Poll `/getpayment` until the payment is settled.
-5. Claim the HTLC on-chain.
+5. Claim the HTLC on-chain (POC, pays LP Taproot address derived from LP WIF).
 
 ## Persistence
 
@@ -276,7 +266,8 @@ src/
 │  ├─ watch.ts        # UTXO monitoring
 │  ├─ htlc.ts         # P2WSH HTLC builder (deprecated)
 │  ├─ htlc_p2tr.ts    # P2TR HTLC builder
-│  ├─ claim.ts        # Claim HTLC with preimage
+│  ├─ claim.ts        # Claim P2WSH HTLC with preimage
+│  ├─ htlc_p2tr_finalize.ts   # Claim/refund P2TR HTLC
 │  ├─ refund.ts       # Refund PSBT builder
 │  ├─ deposit.ts      # Deposit transaction builder
 │  ├─ verify_p2tr.ts  # HTLC verification for LP

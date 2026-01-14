@@ -6,8 +6,8 @@ export interface SubmarineData {
   fundingTxid: string;
   fundingVout: number;
   userRefundPubkeyHex: string;
-  paymentHash: string;
   tLock: number; // Timelock block height used by USER when building HTLC
+  // paymentHash is NOT included - LP decodes invoice & extracts it
 }
 
 const USER_COMM_URL = config.USER_COMM_URL ?? 'http://localhost:9999';
@@ -24,7 +24,7 @@ export async function fetchSubmarineData(): Promise<SubmarineData> {
 }
 
 export async function waitForSubmarineData(
-  maxAttempts: number = 60,
+  maxAttempts: number = 1800, // 1800 attempts × 2s = 3600s = 1 hour
   pollIntervalMs: number = 2000
 ): Promise<SubmarineData> {
   for (let i = 0; i < maxAttempts; i++) {

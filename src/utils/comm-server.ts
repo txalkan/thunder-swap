@@ -6,8 +6,8 @@ export interface SubmarineData {
   fundingTxid: string;
   fundingVout: number;
   userRefundPubkeyHex: string;
-  paymentHash: string;
   tLock: number; // Timelock block height used by USER when building HTLC
+  // paymentHash is NOT included - LP decodes invoice & extracts it
 }
 
 let submarineData: SubmarineData | null = null;

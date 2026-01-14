@@ -55,7 +55,7 @@ export async function waitForFunding(
   // Note: We don't import the HTLC address as it's not owned by our wallet
   console.log('Using transaction monitoring fallback...');
   
-  const maxAttempts = 60; // 5 minutes at 5 second intervals
+  const maxAttempts = 60; // 60 minutes at 1 minute intervals
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       // Get recent block hash and check recent transactions
@@ -93,7 +93,7 @@ export async function waitForFunding(
     }
 
     // Wait before next attempt
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 60000));
     console.log(`Polling for funding confirmation (attempt ${attempt + 1}/${maxAttempts})...`);
   }
 

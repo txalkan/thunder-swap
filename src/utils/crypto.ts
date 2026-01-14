@@ -95,3 +95,12 @@ export function assertValidCompressedPubkey(pubkeyHex: string, label: string): v
     throw new Error(`${label} pubkey is not a valid secp256k1 point`);
   }
 }
+
+/**
+ * Convert compressed pubkey hex to x-only hex (drops 0x02/0x03 prefix).
+ * Assumes caller validates compressed pubkey format beforehand.
+ */
+export function getXOnlyHex(compressedPubkeyHex: string): string {
+  const buf = hexToBuffer(compressedPubkeyHex);
+  return buf.subarray(1).toString('hex');
+}

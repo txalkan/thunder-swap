@@ -4,6 +4,7 @@ import { waitForFunding } from '../bitcoin/watch.js';
 import { buildHtlcRedeemScript } from '../bitcoin/htlc.js';
 import { buildP2TRHTLC } from '../bitcoin/htlc_p2tr.js';
 import { claimWithPreimage } from '../bitcoin/claim.js';
+import { claimP2trHtlc } from '../bitcoin/htlc_p2tr_finalize.js';
 import { buildRefundPsbtBase64 } from '../bitcoin/refund.js';
 import { sendDepositTransaction } from '../bitcoin/deposit.js';
 import { verifyFundingTransaction } from '../bitcoin/verify_p2tr.js';
@@ -173,6 +174,7 @@ export async function runDeposit(
   });
 
   // Step 2: Build HTLC (P2TR)
+  console.log('\nStep 2: Building HTLC (P2TR)...');
   // Read tip height and set timeout block height
   const tipHeight = await rpcClient.getBlockCount();
   const tLock = tipHeight + cfg.LOCKTIME_BLOCKS;
@@ -182,7 +184,6 @@ export async function runDeposit(
   const lpPubkeyHex = cfg.LP_PUBKEY_HEX;
   console.log(`   LP Public Key: ${lpPubkeyHex}`);
 
-  console.log('\nStep 2: Building HTLC (P2TR)...');
   const p2trResult = buildP2tr(H, lpPubkeyHex, userRefundPubkeyHex, tLock);
   console.log(`   P2TR HTLC Address: ${p2trResult.taproot_address}`);
   console.log(`   Amount to fund: ${amountSat} sats`);
@@ -296,9 +297,13 @@ export async function runLpOperatorFlow(
   const cfg = depsOverride.config ?? config;
 
   // Step 1: Decode invoice to get payment hash and amount.
+  console.log('\nStep 1: Decoding HODL invoice...');
   const decoded = await rln.decode(invoice);
   const paymentHash = decoded.payment_hash;
   const amountMsat = decoded.amt_msat;
+  console.log(`   Decoded Invoice: ${JSON.stringify(decoded, null, 2)}`);
+  console.log(`   Payment Hash (H): ${paymentHash}`);
+  console.log(`   Amount: ${amountMsat} millisatoshis`);
 
   if (!cfg.LP_PUBKEY_HEX) {
     throw new Error('LP_PUBKEY_HEX is required to verify the HTLC');
@@ -313,20 +318,31 @@ export async function runLpOperatorFlow(
     user_pubkey: userRefundPubkeyHex,
     cltv_expiry: tLock // Use USER's tLock from submarine data
   };
-  await verifyFunding(
+
+  console.log('\nStep 2: Verify P2TR HTLC funding output...');
+  console.log(`   Funding Transaction: ${fundingTxid}:${fundingVout}`);
+  console.log(`   Template: ${JSON.stringify(template, null, 2)}`);
+  console.log(`   Min Confs: ${cfg.MIN_CONFS}`);
+
+  const fundingInfo = await verifyFunding(
     { txid: fundingTxid, vout: fundingVout },
     template,
     amountMsat,
     cfg.MIN_CONFS
   );
+  console.log(`   Funding info: ${JSON.stringify(fundingInfo, null, 2)}`);
 
   // Step 3: Send payment.
+  console.log('\nStep 3: Sending payment...');
   const payResult = await rln.pay(invoice);
+  console.log(`   Payment result: ${JSON.stringify(payResult, null, 2)}`);
+
   if (payResult.status === 'Failed') {
     return { payment_hash: paymentHash, status: 'Failed' };
   }
 
   // Step 4: Wait until payment is settled.
+  console.log('\nStep 4: Waiting for payment settlement...');
   const maxAttempts = 120;
   let finalStatus: LpOperatorResult['status'] = 'Timeout';
   let preimage: string | undefined;
@@ -342,6 +358,7 @@ export async function runLpOperatorFlow(
 
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
+  console.log(`   Payment status: ${finalStatus}`);
 
   if (finalStatus !== 'Succeeded') {
     return { payment_hash: paymentHash, status: finalStatus };
@@ -350,10 +367,22 @@ export async function runLpOperatorFlow(
   if (!preimage) {
     throw new Error('Payment succeeded but no preimage is available for on-chain claim');
   }
+  console.log(`   Payment preimage: ${preimage}`);
 
   // Step 5: Claim HTLC on-chain.
-  // TODO: implement a P2TR claim path; claimWithPreimage currently targets the legacy P2WSH flow.
-  throw new Error('P2TR claim flow is not implemented yet for operator-side execution');
+  console.log('\nStep 5: Claiming HTLC on-chain...');
+  
+  const claimResult = await claimP2trHtlc(
+    { txid: fundingTxid, vout: fundingVout, value: fundingInfo.amount_sat },
+    paymentHash,
+    preimage,
+    cfg.WIF,
+    userRefundPubkeyHex,
+    tLock
+  );
+  console.log(`   Claim transaction broadcast: ${claimResult.txid}`);
+  console.log(`   LP claim address: ${claimResult.lp_address}`);
+  return { payment_hash: paymentHash, status: 'Succeeded', claim_txid: claimResult.txid };
 }
 
 /**
