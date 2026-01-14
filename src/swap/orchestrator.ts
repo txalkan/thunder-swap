@@ -74,6 +74,7 @@ interface LpOperatorParams {
   fundingTxid: string;
   fundingVout: number;
   userRefundPubkeyHex: string;
+  tLock: number; // Timelock block height (must match USER's HTLC construction)
 }
 
 interface LpOperatorResult {
@@ -287,7 +288,7 @@ export async function runUserSettleHodlInvoice(
  * LP/operator-side flow: verify HTLC, pay invoice, wait for settlement, claim on-chain.
  */
 export async function runLpOperatorFlow(
-  { invoice, fundingTxid, fundingVout, userRefundPubkeyHex }: LpOperatorParams,
+  { invoice, fundingTxid, fundingVout, userRefundPubkeyHex, tLock }: LpOperatorParams,
   depsOverride: Partial<RunLpOperatorDeps> = {}
 ): Promise<LpOperatorResult> {
   const rln = depsOverride.rlnClient ?? rlnClient;
@@ -304,12 +305,13 @@ export async function runLpOperatorFlow(
   }
 
   // Step 2: Verify HTLC funding output (P2TR).
-  const tLock = (await rpc.getBlockCount()) + cfg.LOCKTIME_BLOCKS;
+  // Use the exact tLock that USER used when building the HTLC (sent via submarine data)
+  // Do NOT recalculate - block height will have changed!
   const template = {
     payment_hash: paymentHash,
     lp_pubkey: cfg.LP_PUBKEY_HEX,
     user_pubkey: userRefundPubkeyHex,
-    cltv_expiry: tLock
+    cltv_expiry: tLock // Use USER's tLock from submarine data
   };
   await verifyFunding(
     { txid: fundingTxid, vout: fundingVout },
