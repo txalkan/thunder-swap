@@ -96,12 +96,51 @@ npm run balance -- sendbtc <user/lp> <toAddress> <sats>
 
 ### 3. Start RGB-LN Node
 
-RGB Lightning Node must be accessible at `RLN_BASE_URL` with the following endpoints:
+The USER and LP clients connect to their respective RGB Lightning Nodes via `RLN_BASE_URL` configured in `.env.user` and `.env.lp`. Ensure the RLN instances are accessible with the following endpoints:
 
-- `POST /decode` - Returns `{payment_hash, amount_sat, expires_at?}`
-- `POST /pay` - Returns `{status, preimage?}` (preimage required on success)
+- `POST /decodelninvoice` - Returns `{payment_hash, amt_msat, expires_at?}`
+- `POST /sendpayment` - Returns `{status, payment_hash, payment_secret}`
+- `POST /getpayment` - Returns `{payment: {status, preimage? ...}}` (preimage required on success)
+- `POST /invoice/hodl` - Returns `{invoice, payment_secret}`
+- `POST /invoice/settle` - Returns `{}` (empty)
+- `POST /invoice/cancel` - Returns `{}` (empty)
 
-### 4. Run Swap (HODL Invoice Creation)
+### 4. Running Two Instances (USER and LP)
+
+To run both USER and LP clients simultaneously, use the provided scripts:
+
+**Terminal 1 (USER):**
+```bash
+./run-user.sh
+```
+
+**Terminal 2 (LP):**
+```bash
+./run-lp.sh
+```
+
+**Client Communication:** (TODO-comms: improve client-to-client comms).
+
+Share invoice and deposit txid:
+- USER creates HODL invoice and HTLC deposit, 
+then shares:
+  - Invoice (encoded invoice string)
+  - Deposit txid (Bitcoin transaction ID and vout 
+sending funds into the HTCL address)
+- LP receives these and executes payment/claim 
+flow
+
+Built-in minimal comms (HTTP, no extra deps):
+- USER starts a tiny HTTP server on `CLIENT_COMM_PORT` (default `9999`) and publishes submarine data (invoice, funding txid/vout, user refund pubkey).
+- LP polls `USER_COMM_URL` (default `http://localhost:9999/submarine`) to fetch that data and run the operator flow.
+
+Env variables:
+- `.env.user`: `CLIENT_COMM_PORT=9999`
+- `.env.lp`: `USER_COMM_URL=http://localhost:9999`
+
+**Note:** Environment variables override `.env` file values. The scripts set `CLIENT_ROLE` via environment variable, so you can keep a default in `.env` without conflicts.
+
+### 5. Run Swap (HODL Invoice Creation)
 
 Execute with `CLIENT_ROLE` set (in `.env`):
 
@@ -114,12 +153,16 @@ Arguments:
 - `USER_REFUND_PUBKEY_HEX`: 33-byte compressed public key (hex)
 - `USER_REFUND_ADDRESS`: Bitcoin refund address
 
+Note: these arguments are deprecated and only apply to the legacy P2WPKH path. The current
+Taproot flow derives the user pubkey and refund address from the USER WIF.
+
 Process:
 
 1. Prompts for swap amount (sats)
-2. Generates 32-byte preimage and SHA256 payment hash
-3. Creates HODL invoice via `/invoice/hodl` (expiry: `HODL_EXPIRY_SEC`)
-4. Persists `payment_hash → {preimage, metadata}` to `hodl_store.json`
+2. Derives USER pubkey and refund address from the USER WIF (Taproot)
+3. Generates 32-byte preimage and SHA256 payment hash
+4. Creates HODL invoice via `/invoice/hodl` (expiry: `HODL_EXPIRY_SEC`)
+5. Persists `payment_hash → {preimage, metadata}` to `hodl_store.json`
 
 ### Deposit Flow Summary
 
@@ -148,6 +191,53 @@ Process:
 6. On success: claim HTLC via preimage revelation
 7. On timeout/failure: generate refund PSBT (requires `tLock` expiry)
 
+## Two-Party Flow (User vs Operator)
+
+The POC is split into a USER-side deposit flow and an LP/operator-side execution flow.
+
+### USER (runDeposit)
+
+1. Set `CLIENT_ROLE=USER` in `.env` and load `.env.user`.
+2. Run the CLI (legacy args are deprecated; Taproot derives from USER WIF).
+3. The client generates a preimage and creates a HODL invoice via `/invoice/hodl`.
+4. It builds the P2TR HTLC using `LP_PUBKEY_HEX` and funds it from the USER wallet.
+5. It waits for `MIN_CONFS`, then sends the invoice and deposit txid to the operator.
+6. It waits for a claimable event (poll USER RLN for `Pending` inbound payment).
+7. It decides to call `/invoice/settle` or wait for timeout and refund the HTLC.
+
+### LP/Operator (pay + claim/refund)
+
+1. Receive the invoice and HTLC deposit txid from the USER.
+2. Verify the HTLC using the current verification flow (TODO: not production-ready; basic on-chain output checks only. Limitations include no script-path spend simulation, no signer policy checks, no fee or RBF handling, no reorg handling, and no confirmation of user/LP key provenance beyond matching template parameters.
+3. Call `/sendpayment` to pay the invoice.
+4. Poll `/getpayment` until the payment is settled.
+5. Claim the HTLC on-chain.
+
+## Persistence
+
+The USER-side flow persists a `HodlRecord` to:
+
+`~/.thunder-swap/hodl_store.json`
+
+```json
+{
+  "payment_hash": "hex",
+  "preimage": "hex",
+  "amount_msat": 123000,
+  "expiry_sec": 86400,
+  "invoice": "rgb1...",
+  "payment_secret": "hex",
+  "created_at": 1700000000000
+}
+```
+
+The preimage is required later to claim the HTLC once the payment succeeds.
+
+TODO: Improve persistence to support recovery, retries, and multi-swap bookkeeping:
+- Extend `HodlRecord` with `funding_txid`, `funding_vout`, `t_lock`, `user_pubkey`, `lp_pubkey`, `status`.
+- Add encryption at rest and explicit backup/restore flow.
+- Add index/list endpoints for operator and user recovery tools.
+
 ## RGB-LN Node Requirements
 
 The RGB-LN node must return the preimage in the payment response:
@@ -172,6 +262,7 @@ The preimage is required for HTLC claim operations.
 - ✅ Verifies preimage matches payment hash (H)
 - ✅ Confirms HTLC funding before payment attempt
 - ✅ Safe refund PSBT with timelock validation
+- ✅ Enforces `LOCKTIME_BLOCKS` to outlast `HODL_EXPIRY_SEC` (defaults in `.env.example`: 288 blocks ≈ 2 days vs 86400 sec = 1 day)
 
 ## Tests
 
@@ -193,7 +284,7 @@ npm test
 ## Troubleshooting
 
 **`CLIENT_ROLE environment variable is required`**  
-→ Define `CLIENT_ROLE` in `.env` (LP or USER) so the correct overlay loads. Shell override is not supported in this POC.
+→ Define `CLIENT_ROLE` in `.env` as a default, or override via environment variable: `CLIENT_ROLE=LP npm run dev`. The environment variable takes precedence over `.env` file values.
 
 **Wrong environment file loaded**  
 → Verify `CLIENT_ROLE` in `.env` matches existing `.env.lp` or `.env.user`. No fallback to `.env` only.
