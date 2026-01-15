@@ -47,15 +47,18 @@ const server = http.createServer((req, res) => {
   res.end('Not found');
 });
 
-export function startCommServer(): void {
-  if (CLIENT_ROLE !== 'USER') return;
+export function startCommServer(): Promise<void> {
+  if (CLIENT_ROLE !== 'USER') return Promise.resolve();
 
-  server.listen(PORT, () => {
-    console.log(`📡 USER comm server running on http://localhost:${PORT}/submarine (LP will connect via comm client)`);
+  return new Promise((resolve) => {
+    server.listen(PORT, () => {
+      console.log(`📡 USER comm server running on http://localhost:${PORT}/submarine (LP will connect via comm client)\n`);
+      resolve();
+    });
   });
 }
 
 export function publishSubmarineData(data: SubmarineData): void {
   submarineData = data;
-  console.log('📤 Published submarine data for LP retrieval.');
+  console.log('   📤 Published submarine data for LP retrieval.');
 }

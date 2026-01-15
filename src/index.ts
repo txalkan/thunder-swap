@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { runDeposit, runLpOperatorFlow } from './swap/orchestrator.js';
+import { runDeposit, runLpOperatorFlow, runUserSettleHodlInvoice } from './swap/orchestrator.js';
 import { validateWIF, isValidCompressedPubkey } from './utils/crypto.js';
 import { CLIENT_ROLE, config } from './config.js';
 import readline from 'node:readline/promises';
@@ -110,7 +110,7 @@ function validateEnvironment(): void {
 }
 
 async function runUserFlow(): Promise<void> {
-  startCommServer();
+  await startCommServer();
 
   // Derive user refund pubkey from WIF
   const derived = deriveTaprootFromWIF(config.WIF);
@@ -119,7 +119,7 @@ async function runUserFlow(): Promise<void> {
   // Prompt for swap amount
   const amountSat = await parseAmount();
 
-  console.log('Submarine Swap Parameters:');
+  console.log('\nSubmarine Swap Parameters:');
   console.log(`   Amount: ${amountSat} sats`);
   console.log(`   User Refund Pubkey: ${userRefundPubkeyHex}`);
   console.log(`   User Refund Address: ${derived.taproot_address}\n`);
@@ -128,7 +128,7 @@ async function runUserFlow(): Promise<void> {
   const result = await runDeposit({ amountSat, userRefundPubkeyHex });
 
   console.log('\n=====================================');
-  console.log('HODL invoice prepared and deposit confirmed.');
+  console.log('HODL invoice prepared and on-chain deposit confirmed.');
   console.log(`   Invoice: ${result.invoice}`);
   console.log(`   Payment Hash: ${result.payment_hash}`);
   console.log(`   Preimage: ${result.preimage}`);
@@ -147,7 +147,7 @@ async function runUserFlow(): Promise<void> {
     `   Funding: ${result.funding.txid}:${result.funding.vout} (${result.funding.value} sats)`
   );
 
-  // Publish submarine data for LP to consume
+  console.log('\nStep 5: Publishing submarine data for LP to consume...');
   publishSubmarineData({
     invoice: result.invoice,
     fundingTxid: result.funding.txid,
@@ -155,7 +155,10 @@ async function runUserFlow(): Promise<void> {
     userRefundPubkeyHex: userRefundPubkeyHex,
     tLock: result.t_lock // Send the exact timelock USER used when building HTLC
   });
-  console.log('LP can now fetch submarine data via comm client and proceed to pay/claim.');
+  console.log('   LP can now fetch submarine data via comm client and proceed to pay & claim.');
+
+  console.log('\nStep 6: Waiting for payment confirmation...');
+  await runUserSettleHodlInvoice({paymentHash: result.payment_hash});
 }
 
 async function runLpFlow(): Promise<void> {
