@@ -43,16 +43,10 @@ Set `CLIENT_ROLE` in `.env`:
 - `CLIENT_ROLE=LP` → `.env.lp` overlays shared defaults
 - `CLIENT_ROLE=USER` → `.env.user` overlays shared defaults
 
-#### Create shared and role-specific files
+**Note:** The `run-user.sh` and `run-lp.sh` scripts automatically create `.env`, `.env.user`, and `.env.lp` from their example files if they don't already exist.
 
+**Shared defaults:**
 ```bash
-cp .env.example .env               # shared defaults (CLIENT_ROLE, Bitcoin RPC, NETWORK/SIGNET, MIN_CONFS, LOCKTIME_BLOCKS, etc.)
-cp .env.lpexample .env.lp          # LP-only overrides (LP WIF, LP RLN endpoint)
-cp .env.userexample .env.user      # USER-only overrides (USER WIF, USER RLN endpoint)
-```
-
-```bash
-# Bitcoin Core RPC
 BITCOIN_RPC_URL=http://127.0.0.1:18443
 BITCOIN_RPC_USER=rpcuser
 BITCOIN_RPC_PASS=rpcpass
@@ -62,35 +56,15 @@ LOCKTIME_BLOCKS=288 # 2days
 HODL_EXPIRY_SEC=86400 # 1day
 FEE_RATE_SAT_PER_VB=1
 LP_PUBKEY_HEX=03...  # Compressed pubkey (33 bytes hex)
+```
 
-# Role-specific env loaded via CLIENT_ROLE overlay
+**Role-specific env overlay:**
+```bash
 # RGB-LN Node
 RLN_BASE_URL=http://localhost:8080
 RLN_API_KEY=optional_bearer_token
 # Signing key
 WIF=cV...
-```
-
-You can also derive the PUBKEY_HEX and a Taproot (bech32m) address directly from the WIF loaded via `.env.<role>`:
-
-```bash
-# Ensure CLIENT_ROLE is set to LP or USER and the corresponding WIF is in .env.lp or .env.user
-npm run derive-keys
-# prints JSON with pubkey_hex, x_only_pubkey_hex, and taproot_address
-```
-
-Check current Taproot balances for both roles (LP from `LP_PUBKEY_HEX`, user from `WIF`):
-
-```bash
-npm run balance
-```
-Shows both user Taproot and user P2WPKH balances (from the same WIF) plus LP Taproot.
-
-Send funds using the same keys (builds and signs locally):
-
-```bash
-# Send 10000 sats from USER or LP (if LP_WIF is present in .env.lp) to some address
-npm run balance -- sendbtc <user/lp> <toAddress> <sats>
 ```
 
 ### 3. Start RGB-LN Node
@@ -294,6 +268,32 @@ Current implementation targets regtest/testnet. For production:
 - Implement WebSocket for real-time payment tracking
 - Add proper DDoS protection mechanisms
 - Extend RGB-LN API to formal versioning contract
+
+## Appendix
+
+### Key Derivation and Balance Utilities
+
+You can also derive the PUBKEY_HEX and a Taproot (bech32m) address directly from the WIF loaded via `.env.<role>`:
+
+```bash
+# Ensure CLIENT_ROLE is set to LP or USER and the corresponding WIF is in .env.lp or .env.user
+npm run derive-keys
+# prints JSON with pubkey_hex, x_only_pubkey_hex, and taproot_address
+```
+
+Check current Taproot balances for both roles (LP from `LP_PUBKEY_HEX`, user from `WIF`):
+
+```bash
+npm run balance
+```
+Shows both user Taproot and user P2WPKH balances (from the same WIF) plus LP Taproot.
+
+Send funds using the same keys (builds and signs locally):
+
+```bash
+# Send 10000 sats from USER or LP (if LP_WIF is present in .env.lp) to some address
+npm run balance -- sendbtc <user/lp> <toAddress> <sats>
+```
 
 ## License
 
