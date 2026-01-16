@@ -387,18 +387,21 @@ export async function runLpOperatorFlow(
   let finalStatus: LpOperatorResult['status'] = 'Timeout';
   let preimage: string | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const paymentDetails = await rln.getPayment(paymentHash);
-    finalStatus = paymentDetails.payment.status as LpOperatorResult['status'];
+    const paymentStatus = await rln.getPaymentPreimage(paymentHash);
+    finalStatus = paymentStatus.status as LpOperatorResult['status'];
     console.log(`   Attempt ${attempt + 1}/${maxAttempts}: Status = ${finalStatus}`);
 
-    if (finalStatus === 'Succeeded' || finalStatus === 'Cancelled' || finalStatus === 'Failed') {
-      preimage = paymentDetails.payment.preimage;
+    if (finalStatus === 'Succeeded') {
+      preimage = paymentStatus.preimage ?? undefined;
+      if (preimage) {
+        break;
+      }
+    } else if (finalStatus === 'Cancelled' || finalStatus === 'Failed') {
       break;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
-  console.log(`   Payment status: ${finalStatus}`);
 
   if (finalStatus !== 'Succeeded') {
     return { payment_hash: paymentHash, status: finalStatus };

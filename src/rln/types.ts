@@ -40,6 +40,21 @@ export interface GetPaymentResponse {
 }
 
 /**
+ * Request for getting outbound payment preimage by hash
+ */
+export interface GetPaymentPreimageRequest {
+  payment_hash: string;
+}
+
+/**
+ * Response from getPaymentPreimage API call
+ */
+export interface GetPaymentPreimageResponse {
+  status: 'Pending' | 'Claimable' | 'Succeeded' | 'Cancelled' | 'Failed' | 'Timeout';
+  preimage?: string | null;
+}
+
+/**
  * Request for creating a HODL invoice
  */
 export interface InvoiceHodlRequest {
@@ -100,6 +115,7 @@ export interface RLNClientInterface {
   decode(invoice: string): Promise<DecodeInvoiceResponse>;
   pay(invoice: string): Promise<PayInvoiceResponse>;
   getPayment(paymentHash: string): Promise<GetPaymentResponse>;
+  getPaymentPreimage(paymentHash: string): Promise<GetPaymentPreimageResponse>;
   invoiceHodl(request: InvoiceHodlRequest): Promise<InvoiceHodlResponse>;
   invoiceSettle(request: InvoiceSettleRequest): Promise<EmptyResponse>;
   invoiceCancel(request: InvoiceCancelRequest): Promise<EmptyResponse>;

@@ -4,6 +4,7 @@ import {
   DecodeInvoiceResponse,
   PayInvoiceResponse,
   GetPaymentResponse,
+  GetPaymentPreimageResponse,
   InvoiceHodlRequest,
   InvoiceHodlResponse,
   InvoiceSettleRequest,
@@ -94,6 +95,22 @@ export class RLNClient {
       const errorMsg =
         error?.response?.data?.error || error?.message || 'Failed to get payment details';
       throw new Error(`RLN getPayment error: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Get outbound payment status and preimage (when available) by payment hash
+   */
+  async getPaymentPreimage(paymentHash: string): Promise<GetPaymentPreimageResponse> {
+    try {
+      const response = await this.httpClient.post('/getpaymentpreimage', {
+        payment_hash: paymentHash
+      });
+      return response.data;
+    } catch (error: any) {
+      const errorMsg =
+        error?.response?.data?.error || error?.message || 'Failed to get payment preimage';
+      throw new Error(`RLN getPaymentPreimage error: ${errorMsg}`);
     }
   }
 

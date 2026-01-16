@@ -192,7 +192,7 @@ async function runLpFlow(): Promise<void> {
     tLock: submarineData.tLock // Use USER's exact timelock
   });
 
-  console.log('LP flow completed:', result);
+  console.log('LP flow completed:', JSON.stringify(result, null, 2));
 }
 
 async function main(): Promise<void> {
