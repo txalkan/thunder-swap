@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-import { runDeposit, runLpOperatorFlow, runUserSettleHodlInvoice } from './swap/orchestrator.js';
+import {
+  runDeposit,
+  runLpOperatorFlow,
+  runUserSettleHodlInvoice,
+  runUserWaitInvoiceStatus
+} from './swap/orchestrator.js';
 import { validateWIF, isValidCompressedPubkey } from './utils/crypto.js';
 import { CLIENT_ROLE, config } from './config.js';
 import readline from 'node:readline/promises';
@@ -159,6 +164,14 @@ async function runUserFlow(): Promise<void> {
 
   console.log('\nStep 6: Waiting for payment confirmation...');
   await runUserSettleHodlInvoice({ paymentHash: result.payment_hash });
+
+  console.log('\nStep 7: Getting invoice status...');
+  const invoiceStatus = await runUserWaitInvoiceStatus({ invoice: result.invoice });
+  if (invoiceStatus.status === 'Succeeded') {
+    console.log('   Invoice settled successfully');
+  } else {
+    console.log('   Invoice not settled');
+  }
 }
 
 async function runLpFlow(): Promise<void> {

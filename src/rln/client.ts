@@ -8,6 +8,8 @@ import {
   InvoiceHodlResponse,
   InvoiceSettleRequest,
   InvoiceCancelRequest,
+  InvoiceStatusRequest,
+  InvoiceStatusResponse,
   EmptyResponse
 } from './types.js';
 
@@ -145,6 +147,20 @@ export class RLNClient {
       const errorMsg =
         error?.response?.data?.error || error?.message || 'Failed to cancel HODL invoice';
       throw new Error(`RLN invoiceCancel error: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Get invoice status by invoice string
+   */
+  async invoiceStatus(request: InvoiceStatusRequest): Promise<InvoiceStatusResponse> {
+    try {
+      const response = await this.httpClient.post('/invoicestatus', request);
+      return response.data;
+    } catch (error: any) {
+      const errorMsg =
+        error?.response?.data?.error || error?.message || 'Failed to get invoice status';
+      throw new Error(`RLN invoiceStatus error: ${errorMsg}`);
     }
   }
 }

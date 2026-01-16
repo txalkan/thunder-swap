@@ -75,6 +75,20 @@ export interface InvoiceCancelRequest {
 }
 
 /**
+ * Request for getting invoice status
+ */
+export interface InvoiceStatusRequest {
+  invoice: string;
+}
+
+/**
+ * Response from invoice status API call
+ */
+export interface InvoiceStatusResponse {
+  status: 'Pending' | 'Succeeded' | 'Cancelled' | 'Failed' | 'Expired';
+}
+
+/**
  * Empty response for settle/cancel operations
  */
 export interface EmptyResponse {}
@@ -89,4 +103,5 @@ export interface RLNClientInterface {
   invoiceHodl(request: InvoiceHodlRequest): Promise<InvoiceHodlResponse>;
   invoiceSettle(request: InvoiceSettleRequest): Promise<EmptyResponse>;
   invoiceCancel(request: InvoiceCancelRequest): Promise<EmptyResponse>;
+  invoiceStatus(request: InvoiceStatusRequest): Promise<InvoiceStatusResponse>;
 }

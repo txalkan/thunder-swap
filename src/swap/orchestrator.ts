@@ -70,6 +70,16 @@ interface UserSettleResult {
   status: 'Pending' | 'Claimable' | 'Succeeded' | 'Cancelled' | 'Failed' | 'Timeout';
 }
 
+interface UserInvoiceStatusParams {
+  invoice: string;
+  maxAttempts?: number;
+  pollIntervalMs?: number;
+}
+
+interface UserInvoiceStatusResult {
+  status: 'Pending' | 'Succeeded' | 'Cancelled' | 'Failed' | 'Expired' | 'Timeout';
+}
+
 interface LpOperatorParams {
   invoice: string;
   fundingTxid: string;
@@ -283,6 +293,36 @@ export async function runUserSettleHodlInvoice(
   });
 
   return { payment_hash: paymentHash, settled: true, status: 'Succeeded' };
+}
+
+/**
+ * User-side flow: poll invoice status after settlement until final.
+ */
+export async function runUserWaitInvoiceStatus(
+  { invoice, maxAttempts = 120, pollIntervalMs = 5000 }: UserInvoiceStatusParams,
+  depsOverride: Partial<RunUserSettleDeps> = {}
+): Promise<UserInvoiceStatusResult> {
+  const rln = depsOverride.rlnClient ?? rlnClient;
+
+  let status: UserInvoiceStatusResult['status'] = 'Timeout';
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await rln.invoiceStatus({ invoice });
+    status = response.status;
+    console.log(`   Attempt ${attempt + 1}/${maxAttempts}: Status = ${status}`);
+
+    if (
+      status === 'Succeeded' ||
+      status === 'Cancelled' ||
+      status === 'Failed' ||
+      status === 'Expired'
+    ) {
+      return { status };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  return { status };
 }
 
 /**
