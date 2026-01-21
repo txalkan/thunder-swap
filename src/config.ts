@@ -43,6 +43,8 @@ const configSchema = z.object({
     .regex(/^(02|03)[0-9a-fA-F]{64}$/, 'LP_PUBKEY_HEX must be a compressed pubkey'),
   RLN_BASE_URL: z.string().url(),
   RLN_API_KEY: z.string().optional(),
+  RLN_BASE_URL_L1: z.string().url().optional(),
+  RLN_API_KEY_L1: z.string().optional(),
   HODL_EXPIRY_SEC: z
     .string()
     .transform((val) => parseInt(val, 10))
@@ -66,6 +68,8 @@ export const config = configSchema.parse({
   LP_PUBKEY_HEX: process.env.LP_PUBKEY_HEX,
   RLN_BASE_URL: process.env.RLN_BASE_URL!,
   RLN_API_KEY: process.env.RLN_API_KEY,
+  RLN_BASE_URL_L1: process.env.RLN_BASE_URL_L1,
+  RLN_API_KEY_L1: process.env.RLN_API_KEY_L1,
   HODL_EXPIRY_SEC: process.env.HODL_EXPIRY_SEC ?? '86400',
   CLIENT_COMM_PORT: process.env.CLIENT_COMM_PORT ?? '9999',
   USER_COMM_URL: process.env.USER_COMM_URL
