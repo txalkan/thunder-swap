@@ -56,12 +56,25 @@ const configSchema = z.object({
   USER_COMM_URL: z.string().url().optional()
 });
 
+const network = process.env.NETWORK!;
+const useRegtestRpc =
+  network === 'regtest' &&
+  process.env.BITCOIN_RPC_URL_REGTEST &&
+  process.env.BITCOIN_RPC_USER_REGTEST != null &&
+  process.env.BITCOIN_RPC_PASS_REGTEST != null;
+
 export const config = configSchema.parse({
-  BITCOIN_RPC_URL: process.env.BITCOIN_RPC_URL!,
-  BITCOIN_RPC_USER: process.env.BITCOIN_RPC_USER!,
-  BITCOIN_RPC_PASS: process.env.BITCOIN_RPC_PASS!,
+  BITCOIN_RPC_URL: useRegtestRpc
+    ? process.env.BITCOIN_RPC_URL_REGTEST!
+    : process.env.BITCOIN_RPC_URL!,
+  BITCOIN_RPC_USER: useRegtestRpc
+    ? process.env.BITCOIN_RPC_USER_REGTEST!
+    : process.env.BITCOIN_RPC_USER!,
+  BITCOIN_RPC_PASS: useRegtestRpc
+    ? process.env.BITCOIN_RPC_PASS_REGTEST!
+    : process.env.BITCOIN_RPC_PASS!,
   WIF: process.env.WIF!,
-  NETWORK: process.env.NETWORK!,
+  NETWORK: network,
   MIN_CONFS: process.env.MIN_CONFS!,
   LOCKTIME_BLOCKS: process.env.LOCKTIME_BLOCKS!,
   FEE_RATE_SAT_PER_VB: process.env.FEE_RATE_SAT_PER_VB ?? '1',
