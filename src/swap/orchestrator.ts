@@ -13,6 +13,8 @@ import { randomBytes } from 'crypto';
 import { getHodlRecord, persistHodlRecord } from '../utils/store.js';
 import { config } from '../config.js';
 import { deriveTaprootFromWIF } from '../bitcoin/keys.js';
+import { getNetwork } from '../bitcoin/network.js';
+import * as bitcoin from 'bitcoinjs-lib';
 
 interface SwapParams {
   invoice: string;
@@ -46,7 +48,7 @@ interface DepositResult {
   };
   htlc_p2tr_address: string;
   htlc_p2tr_script_pubkey: string;
-  htlc_p2tr_internal_key_hex: string;
+  htlc_p2tr_internal_key_hex?: string;
   t_lock: number;
   deposit: {
     fee_sat: number;
@@ -153,12 +155,6 @@ export async function runDeposit(
     );
   }
 
-  if (!cfg.LP_PUBKEY_HEX) {
-    throw new Error(
-      'LP_PUBKEY_HEX is required for HTLC construction. Provide the LP compressed pubkey hex.'
-    );
-  }
-
   // Step 1: Generate preimage/hash and create HODL invoice
   const preimage = randomBytes(32).toString('hex');
   const H = sha256hex(Buffer.from(preimage, 'hex'));
@@ -191,24 +187,52 @@ export async function runDeposit(
     created_at: Date.now()
   });
 
-  // Step 2: Build HTLC (P2TR)
-  console.log('\nStep 2: Building HTLC (P2TR)...');
-  // Read tip height and set timeout block height
-  const tipHeight = await rpcClient.getBlockCount();
-  const tLock = tipHeight + cfg.LOCKTIME_BLOCKS;
-  console.log(`   Current block height: ${tipHeight}`);
+  // Step 2: Create RGB HTLC invoice
+  console.log('\nStep 2: Creating RGB HTLC invoice...');
+
+  const rgbInvoiceResp = await rln.rgbInvoiceHtlc({
+    asset_id: process.env.ASSET_ID_L1,
+    assignment: {
+      type: 'Fungible',
+      value: asset_amount
+    },
+    duration_seconds: expirySec - 2 * 60 * 60, // 2 hours before expiry
+    min_confirmations: cfg.MIN_CONFS,
+    payment_hash: H,
+    user_pubkey: userRefundPubkeyHex,
+    csv: cfg.LOCKTIME_BLOCKS
+  });
+
+  if (!rgbInvoiceResp.htlc_p2tr_script_pubkey) {
+    throw new Error('RLN did not return htlc_p2tr_script_pubkey');
+  }
+  const htlcScriptPubKeyHex = rgbInvoiceResp.htlc_p2tr_script_pubkey;
+  const derivedAddress = bitcoin.address.fromOutputScript(
+    Buffer.from(htlcScriptPubKeyHex, 'hex'),
+    getNetwork()
+  );
+  if (
+    rgbInvoiceResp.htlc_p2tr_address &&
+    rgbInvoiceResp.htlc_p2tr_address !== derivedAddress
+  ) {
+    console.warn(
+      `   WARNING: htlc_p2tr_address mismatch (server ${rgbInvoiceResp.htlc_p2tr_address} vs derived ${derivedAddress})`
+    );
+  }
+  const htlcAddress = rgbInvoiceResp.htlc_p2tr_address ?? derivedAddress;
+
+  const tLock = rgbInvoiceResp.t_lock;
+  if (tLock == null) {
+    throw new Error('RLN did not return t_lock');
+  }
+
+  console.log(`   HTLC script pubkey: ${htlcScriptPubKeyHex}`);
+  console.log(`   P2TR HTLC Address: ${htlcAddress}`);
   console.log(`   Time lock block height: ${tLock}`);
-
-  const lpPubkeyHex = cfg.LP_PUBKEY_HEX;
-  console.log(`   LP Public Key: ${lpPubkeyHex}`);
-
-  const p2trResult = buildP2tr(H, lpPubkeyHex, userRefundPubkeyHex, tLock);
-  console.log(`   P2TR HTLC Address: ${p2trResult.taproot_address}`);
-  console.log(`   Amount to fund: ${amountSat} sats`);
 
   // Step 3: Send deposit to HTLC address
   console.log('\nStep 3: Sending on-chain deposit...');
-  const depositTx = await sendDeposit(p2trResult.taproot_address, amountSat);
+  const depositTx = await sendDeposit(htlcAddress, amountSat);
   console.log(`   Transaction ID: ${depositTx.txid}`);
   if (depositTx.fee_sat > 0) {
     console.log(`   Fee: ${depositTx.fee_sat} sats`);
@@ -219,34 +243,10 @@ export async function runDeposit(
 
   // Step 4: Wait for funding transaction confirmation
   console.log('\nStep 4: Waiting for funding confirmation...');
-  const funding = await waitFunding(p2trResult.taproot_address, cfg.MIN_CONFS);
+  const funding = await waitFunding(htlcAddress, cfg.MIN_CONFS);
   console.log(`   Funding confirmed: ${funding.txid}:${funding.vout} (${funding.value} sats)`);
 
-  // Step 5: Create RGB HTLC invoice
-  console.log('\nStep 5: Creating RGB HTLC invoice...');
-
-  // Derive scriptPubKey (34-byte hex) for binding RGB invoice
-  const htlcScriptPubKeyHex = reconstructP2TRScriptPubKey({
-    payment_hash: H,
-    lp_pubkey: lpPubkeyHex,
-    user_pubkey: userRefundPubkeyHex,
-    cltv_expiry: tLock
-  }).toString('hex');
-  console.log(`   HTLC script pubkey: ${htlcScriptPubKeyHex}`);
-
-  const rgbInvoiceResp = await rln.rgbInvoiceHtlc({
-    asset_id: process.env.ASSET_ID_L1,
-    assignment: {
-      type: 'Fungible',
-      value: asset_amount
-    },
-    duration_seconds: expirySec - 2 * 60 * 60, // 2 hours before expiry
-    min_confirmations: cfg.MIN_CONFS,
-    htlc_p2tr_script_pubkey: htlcScriptPubKeyHex,
-    t_lock: tLock
-  });
-
-  // Step 6: Send RGB asset to HTLC via /sendasset (uses L1 backend)
+  // Step 5: Send RGB asset to HTLC via /sendasset (uses L1 backend)
   console.log('\nStep 6: Sending RGB asset via /sendasset...');
   const rgbSendResp = await rln.sendAsset(rgbInvoiceResp.invoice);
   console.log(
@@ -260,9 +260,8 @@ export async function runDeposit(
     invoice: invoiceResp.invoice,
     amount_msat: amountMsat,
     expiry_sec: expirySec,
-    htlc_p2tr_address: p2trResult.taproot_address,
+    htlc_p2tr_address: htlcAddress,
     htlc_p2tr_script_pubkey: htlcScriptPubKeyHex,
-    htlc_p2tr_internal_key_hex: p2trResult.internal_key_hex,
     t_lock: tLock,
     rgb_invoice: rgbInvoiceResp.invoice,
     rgb_send: rgbSendResp,
@@ -385,9 +384,14 @@ export async function runLpOperatorFlow(
   const decoded = await rln.decode(invoice);
   const paymentHash = decoded.payment_hash;
   const amountMsat = decoded.amt_msat;
+  if (amountMsat == null) {
+    throw new Error('Decoded invoice missing amt_msat; cannot verify funding amount.');
+  }
+  const expiresAt = decoded.timestamp + decoded.expiry_sec;
   console.log(`   Decoded Invoice: ${JSON.stringify(decoded, null, 2)}`);
   console.log(`   Payment Hash (H): ${paymentHash}`);
   console.log(`   Amount: ${amountMsat} millisatoshis`);
+  console.log(`   Expires: ${new Date(expiresAt * 1000).toISOString()}`);
 
   if (!cfg.LP_PUBKEY_HEX) {
     throw new Error('LP_PUBKEY_HEX is required to verify the HTLC');
@@ -490,14 +494,18 @@ export async function runSwap({
     // const decodedInvoice = {
     //   payment_hash: 'f4d376425855e2354bf30e17904f4624f6f9aa297973cca0445cdf4cef718b2a',
     //   amt_msat: 3000000,
-    //   expires_at: 1759931597
+    //   expiry_sec: 420,
+    //   timestamp: 1759931177
     // };
     const H = decodedInvoice.payment_hash;
-    const amount_sat = decodedInvoice.amt_msat;
-    const expires_at = decodedInvoice.expires_at;
+    const amount_msat = decodedInvoice.amt_msat;
+    if (amount_msat == null) {
+      throw new Error('Decoded invoice missing amt_msat; cannot determine funding amount.');
+    }
+    const expires_at = decodedInvoice.timestamp + decodedInvoice.expiry_sec;
 
     console.log(`   Payment Hash (H): ${H}`);
-    console.log(`   Amount: ${amount_sat} sats`);
+    console.log(`   Amount: ${amount_msat} millisatoshis`);
     if (expires_at) {
       console.log(`   Expires: ${new Date(expires_at * 1000).toISOString()}`);
     }
@@ -532,7 +540,7 @@ export async function runSwap({
     console.log('\nStep 4: Building HTLC...');
     const htlcResult = buildHtlcRedeemScript(H, lpPubkeyHex, userRefundPubkeyHex, tLock);
     console.log(`   P2WSH HTLC Address: ${htlcResult.p2wshAddress}`);
-    console.log(`   Amount to fund: ${amount_sat} sats`);
+    console.log(`   Amount to fund: ${amount_msat} msats`);
     console.log(`   Redeem Script Hash: ${sha256hex(htlcResult.redeemScript)}`);
 
     // Step 5: Wait for funding transaction confirmation
@@ -552,22 +560,24 @@ export async function runSwap({
 
       // Poll getPayment until status changes from Pending
       const maxAttempts = 60; // 5 minutes at 5 second intervals
-      let finalStatus = 'pending';
+      let finalStatus: 'Pending' | 'Claimable' | 'Succeeded' | 'Cancelled' | 'Failed' = 'Pending';
       let preimage: string | undefined;
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
-          const paymentDetails = await rlnClient.getPayment(H);
-          finalStatus = paymentDetails.payment.status;
+          const paymentStatus = await rlnClient.getPaymentPreimage(H);
+          finalStatus = paymentStatus.status;
 
           console.log(`   Attempt ${attempt + 1}/${maxAttempts}: Status = ${finalStatus}`);
 
           if (finalStatus === 'Succeeded') {
-            preimage = paymentDetails.payment.preimage;
-            console.log(`   Payment succeeded! Preimage: ${preimage}`);
-            break;
-          } else if (finalStatus === 'Failed') {
-            console.log('   Payment failed');
+            preimage = paymentStatus.preimage ?? undefined;
+            if (preimage) {
+              console.log(`   Payment succeeded! Preimage: ${preimage}`);
+              break;
+            }
+          } else if (finalStatus === 'Cancelled' || finalStatus === 'Failed') {
+            console.log('   Payment failed or cancelled');
             break;
           }
 
@@ -642,14 +652,12 @@ export async function runSwap({
     } else if (paymentResult.status === 'Succeeded') {
       // Handle immediate success (fallback for older implementations)
       console.log('   Payment succeeded immediately');
-      console.log('   Fetching preimage via getPayment...');
+      console.log('   Fetching preimage via getPaymentPreimage...');
 
       let preimage: string | undefined;
       try {
-        const paymentDetails = await rlnClient.getPayment(H);
-        preimage = paymentDetails.payment.preimage;
-        // TODO: test data
-        // preimage = '86a85cd1cb86c51186d190972c9f8413f436911fc0de241b6df20877ebbadecc';
+        const paymentDetails = await rlnClient.getPaymentPreimage(H);
+        preimage = paymentDetails.preimage ?? undefined;
 
         if (!preimage) {
           return { success: false, error: 'Payment succeeded but no preimage available' };
