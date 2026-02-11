@@ -14,6 +14,8 @@ import {
   EmptyResponse,
   RgbInvoiceHtlcRequest,
   RgbInvoiceHtlcResponse,
+  HtlcScanRequest,
+  HtlcScanResponse,
   HtlcClaimRequest,
   HtlcClaimResponse,
   SendAssetRequest,
@@ -268,6 +270,20 @@ export class RLNClient {
     } catch (error: any) {
       const errorMsg = error?.response?.data?.error || error?.message || 'Failed to claim HTLC';
       throw new Error(`RLN htlcclaim error: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Scan HTLC funding and refresh RGB transfers on L1
+   */
+  async htlcScan(request: HtlcScanRequest): Promise<HtlcScanResponse> {
+    try {
+      const client = this.httpClientL1;
+      const response = await client.post('/htlcscan', request);
+      return response.data;
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.error || error?.message || 'Failed to scan HTLC';
+      throw new Error(`RLN htlcscan error: ${errorMsg}`);
     }
   }
 

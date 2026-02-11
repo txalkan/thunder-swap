@@ -142,6 +142,7 @@ export interface RLNClientInterface {
   invoiceCancel(request: InvoiceCancelRequest): Promise<EmptyResponse>;
   invoiceStatus(request: InvoiceStatusRequest): Promise<InvoiceStatusResponse>;
   rgbInvoiceHtlc(request: RgbInvoiceHtlcRequest): Promise<RgbInvoiceHtlcResponse>;
+  htlcScan(request: HtlcScanRequest): Promise<HtlcScanResponse>;
   htlcClaim(request: HtlcClaimRequest): Promise<HtlcClaimResponse>;
   sendAsset(invoice: string, overrides?: Partial<SendAssetRequest>): Promise<SendAssetResponse>;
   assetBalance(
@@ -190,6 +191,12 @@ export interface HtlcClaimRequest {
 }
 
 export interface HtlcClaimResponse {}
+
+export interface HtlcScanRequest {
+  payment_hash: string;
+}
+
+export interface HtlcScanResponse {}
 
 export interface WitnessData {
   amount_sat: number;
