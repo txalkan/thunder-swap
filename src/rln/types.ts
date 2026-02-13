@@ -126,7 +126,11 @@ export interface InvoiceStatusResponse {
 /**
  * Empty response for settle/cancel operations
  */
-export interface EmptyResponse {}
+export interface EmptyResponse { }
+
+export interface RefreshTransfersRequest {
+  skip_sync: boolean;
+}
 
 /**
  * Base RGB-LN API client interface
@@ -144,6 +148,7 @@ export interface RLNClientInterface {
   rgbInvoiceHtlc(request: RgbInvoiceHtlcRequest): Promise<RgbInvoiceHtlcResponse>;
   htlcScan(request: HtlcScanRequest): Promise<HtlcScanResponse>;
   htlcClaim(request: HtlcClaimRequest): Promise<HtlcClaimResponse>;
+  refreshTransfers(request: RefreshTransfersRequest): Promise<EmptyResponse>;
   sendAsset(invoice: string, overrides?: Partial<SendAssetRequest>): Promise<SendAssetResponse>;
   assetBalance(
     request: AssetBalanceRequest,
@@ -190,13 +195,13 @@ export interface HtlcClaimRequest {
   preimage: string;
 }
 
-export interface HtlcClaimResponse {}
+export interface HtlcClaimResponse { }
 
 export interface HtlcScanRequest {
   payment_hash: string;
 }
 
-export interface HtlcScanResponse {}
+export interface HtlcScanResponse { }
 
 export interface WitnessData {
   amount_sat: number;
